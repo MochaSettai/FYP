@@ -16,6 +16,8 @@ from agentless.util.preprocess_data import (
 )
 from agentless.util.utils import load_existing_instance_ids, load_jsonl, setup_logger
 
+from agentless.util.model_registry import BACKENDS, DEFAULT_MODEL, MODELS, check_backend
+
 MAX_RETRIES = 5
 
 
@@ -517,9 +519,7 @@ def check_valid_args(args):
         (not args.file_level) and (not args.start_file)
     ), "Must use either file_level or start_file"
 
-    assert (not "deepseek" in args.model) or (
-        args.backend == "deepseek"
-    ), "Must specify `--backend deepseek` if using a DeepSeek model"
+    check_backend(args.model, args.backend)
 
 
 def main():
@@ -569,21 +569,16 @@ def main():
         "--mock", action="store_true", help="Mock run to compute prompt tokens."
     )
     parser.add_argument(
-        "--model",
-        type=str,
-        default="gpt-4o-2024-05-13",
-        choices=[
-            "gpt-4o-2024-05-13",
-            "deepseek-coder",
-            "gpt-4o-mini-2024-07-18",
-            "claude-3-5-sonnet-20241022",
-        ],
+        "--model", 
+        type=str, 
+        default=DEFAULT_MODEL, 
+        choices=list(MODELS)
     )
     parser.add_argument(
-        "--backend",
-        type=str,
-        default="openai",
-        choices=["openai", "deepseek", "anthropic"],
+        "--backend", 
+        type=str, 
+        default="openai", 
+        choices=BACKENDS
     )
     parser.add_argument(
         "--dataset",

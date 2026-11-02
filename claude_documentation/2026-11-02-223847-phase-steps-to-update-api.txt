@@ -1,0 +1,535 @@
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Opus 5.5 · Claude Pro
+ ▝▝   ▝▝   /mnt/c/Users/tssur/Desktop/FYP Development/Agentless
+
+
+❯ Hey, the api models used in the repo is outdated. Tell me step by step how I  
+  can update them to the newest models.                                         
+
+  Read 2 files, ran 1 shell command (ctrl+o to expand)
+
+● Skill(claude-api)
+  ⎿  Successfully loaded skill · 1 tool allowed
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The Claude model in the repo, claude-3-5-sonnet-20241022, was retired on Oct
+  28, 2025, so every --backend anthropic run currently fails. The fallback
+  default in api_requests.py, claude-2.1, was retired in July 2025. Changing the
+  model name alone won't be enough, because the current Claude models also
+  reject some of the parameters this code sends. Here are the steps, in order.
+
+  ---
+
+  Step 1: Upgrade the SDKs
+
+  requirements.txt doesn't pin versions, so upgrade and then pin what you tested
+  with:
+  pip install -U anthropic openai
+  pip freeze | grep -E "^(anthropic|openai)=="   # copy these pins into 
+  requirements.txt
+  The newest anthropic (1.x) needs Python 3.10 or later.
+
+  Step 2: Update the --model options in the 4 command-line scripts
+
+  The same list of model names is copied into each of these:
+  - agentless/fl/localize.py:572
+  - agentless/repair/repair.py:747
+  - agentless/test/generate_reproduction_tests.py:495
+  - agentless/test/select_regression_tests.py:174
+
+  Replace the choices and default in each, for example:
+  choices=[
+      "claude-opus-5-5",      # current Opus ($4 / $20 per 1M tokens)
+      "claude-sonnet-5-5",    # current Sonnet, cheaper ($2 / $10 per 1M tokens)
+      "<current OpenAI model>",
+      "deepseek-chat",
+  ],
+  Better still, define the list once (for example in agentless/util/model.py)
+  and import it in all four files, so next time you only change one place. Also
+  update any --model ... example commands in README.md and README_swebench.md.
+
+  Step 3: Fix the Anthropic request code in agentless/util/api_requests.py
+
+  1. Stop sending temperature (lines 112–126). Opus 5.5 and Sonnet 5.5 return a
+     400 error when it's set, so remove the "temperature" key from both config
+     dicts.
+  2. Replace the old prompt-caching call at line 151.
+     client.beta.prompt_caching.messages.create(...) is a removed beta and
+     doesn't exist in current SDKs. Caching is now standard:
+  ret = client.messages.create(**config)   # the cache_control set on line 148 
+  still works
+  3. Change the default model at line 108 from "claude-2.1" to
+     "claude-opus-5-5".
+  4. (Optional) Add "output_config": {"effort": "high"} to set how hard the
+     model thinks. On Opus 5.5 the default effort is medium.
+
+  Step 4: Fix how responses are read in agentless/util/model.py
+
+  On current Claude models, thinking is always on, so the first block of a
+  response is usually a thinking block, not the text.
+  1. Line 308: ret.content[0].text will break. Use:
+  text = next((b.text for b in ret.content if b.type == "text"), "")
+  2. Lines 152–163 (codegen_w_tool): the code builds the assistant message by
+     removing fields from response.to_dict(). Newer responses contain extra
+     fields (such as stop_details) that would then be sent back and cause a 400.
+     Build the message explicitly instead:
+  json_response = response.to_dict()
+  messages.append({"role": "assistant", "content": json_response["content"]})
+     Keep the thinking blocks inside content unchanged; the API expects them
+     back as they were.
+  3. Raise max_tokens: 1024 is too small once thinking is included, and output
+     will be cut off. Raise it to about 16000 at repair/repair.py:408,444,
+     test/generate_reproduction_tests.py:145,176 and
+     test/select_regression_tests.py:97.
+  4. Sampling: passes that use temperature=0.8 to get varied samples
+     (repair.py:445) can't control temperature with Claude anymore. Repeated
+     samples still differ, but if you want to tune that you need a different
+     approach.
+
+  Step 5: Update the OpenAI path, also in api_requests.py
+
+  gpt-4o-2024-05-13 and gpt-4o-mini-2024-07-18 are old. I'm not sure of OpenAI's
+  newest model names as of today, so check their models page rather than taking
+  a name from me. One thing to know: the GPT-5 family and the o-series
+  reasoning models reject max_tokens (they want max_completion_tokens) and
+  reject any temperature other than 1. In create_chatgpt_config (lines 31–49),
+  switch to max_completion_tokens and leave out temperature for those models.
+
+  Step 6: Update DeepSeek
+
+  deepseek-coder was merged into deepseek-chat, with deepseek-reasoner as the
+  reasoning model. The "deepseek" in args.model checks still work.
+
+  Step 7: Update the cost script
+
+  dev/util/cost.py:35 hard-codes GPT-4o prices ($5 / $15 per 1M tokens). Make
+  the price depend on the model, for example Opus 5.5 at $4 / $20 or Sonnet 5.5
+  at $2 / $10.
+
+  Step 8: Test on one instance before a full run
+
+  Run localization and repair on a single SWE-bench instance with --backend 
+  anthropic --model claude-opus-5-5. Check that the outputs aren't empty and
+  that cache_read_input_tokens is above 0 by the second request. Then run the
+  full benchmark.
+
+  ---
+
+  I haven't changed any files. I can make these edits myself, or you can run
+  /claude-api migrate, which walks through the Claude part. Before I start, tell
+  me which OpenAI model you want to use, or whether you only plan to use
+  Claude.
+
+✻ Crunched for 54s · done 5:56 PM
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /mnt/c/Users/tssur/Desktop/FYP
+     Development/Agentless/2026-11-02-175940-how-to-update-api-models.txt
+
+※ recap: You want Agentless switched from its retired API models to current ones, and I've laid out the steps without editing anything yet. Next, tell me which OpenAI model to use, or whether you're Claude-only, and I'll make the changes. (disable recaps in /config)
+
+❯ I want to ugrade one at a time, which do you suggest first depending on the   
+  complexity?                                                                   
+
+● I'd start with DeepSeek, then OpenAI, then Anthropic. That goes from easiest
+  to hardest:
+
+  Order: 1
+  Provider: DeepSeek
+  What changes: Change the model name from deepseek-coder to deepseek-chat. The
+  code stays the same, because it reuses the OpenAI-style client and the API
+  format hasn't changed.
+  Effort: ~5 min
+  ────────────────────────────────────────
+  Order: 2
+  Provider: OpenAI
+  What changes: New model names, plus create_chatgpt_config if you pick a
+  reasoning model (GPT-5 / o-series): those need max_completion_tokens instead
+  of max_tokens and reject custom temperature. A non-reasoning model is just a
+  name change.
+  Effort: ~30 min
+  ────────────────────────────────────────
+  Order: 3
+  Provider: Anthropic
+  What changes: New model names, remove temperature, replace the removed
+  prompt-caching beta call, handle thinking blocks in responses
+  (content[0].text), rebuild the assistant message in the tool loop, raise
+  max_tokens. This touches both api_requests.py and model.py in several places.
+  Effort: 1–2 hrs with testing
+
+  Why DeepSeek first: the first upgrade is also when you'll centralise the
+  shared --model list (Step 2 from before), which touches all 4 scripts. Doing
+  that alongside a one-word model change means that if something breaks, you
+  know the refactor caused it, not the model change. After that, each later
+  provider only needs edits in its own code path.
+
+  One exception: the Claude path is the only one that's fully broken right now,
+  because its models are retired. If Claude is your main backend for the FYP, do
+  Anthropic first even though it's the most work. DeepSeek and OpenAI's old
+  models still run in the meantime.
+
+  Do you want me to start on DeepSeek, including the shared model list?
+
+✻ Sautéed for 10s · done 6:19 PM
+
+❯ the deepseek-chat model has been retired by deepseek. Let's not assume things 
+  here so look up the latest models for each of them and let's make a plan      
+
+● Fetch(https://api-docs.deepseek.com/quick_start/pricing)
+  ⎿  Received 27.2KB (200 OK)
+
+● Web Search("DeepSeek API deepseek-chat retired new model name 2026")
+  ⎿  Did 1 search in 5s
+
+● Web Search("OpenAI API latest models list November 2026 GPT")
+  ⎿  Did 1 search in 6s
+
+● Fetch(https://platform.openai.com/docs/models)
+  ⎿  Received 787 bytes (301 Moved Permanently)
+
+● Fetch(https://developers.openai.com/api/docs/models)
+  ⎿  Received 396KB (200 OK)
+
+● Fetch(https://developers.openai.com/api/docs/guides/latest-model)
+  ⎿  Received 19.7KB (200 OK)
+
+● Fetch(https://api-docs.deepseek.com/updates/)
+  ⎿  Received 52.9KB (200 OK)
+
+● Fetch(https://api-docs.deepseek.com/guides/thinking_mode)
+  ⎿  Received 115KB (200 OK)
+
+● Web Search("OpenAI GPT-6 chat completions max_completion_tokens n parameter
+            temperature supported reasoning_effort")
+  ⎿  Did 1 search in 6s
+
+● You're right: deepseek-chat and deepseek-reasoner were discontinued on
+  2026-07-24. I recommended deepseek-chat from memory without checking, which
+  was a mistake. I've now checked each provider's official docs. Here's what
+  they say and a plan based on it.
+
+  Current models
+
+  ┌───────────┬───────────────────┬────────────────────┬────────────────────┐
+  │           │                   │                    │    Price ($/1M     │
+  │ Provider  │     Model ID      │    Positioning     │  tokens, input /   │
+  │           │                   │                    │      output)       │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │                   │ V4.1 Flash (Oct 17 │ $0.30 / $1.20 at   │
+  │ DeepSeek  │ deepseek-flash    │  build), latest    │ peak, half that    │
+  │           │                   │                    │ off-peak           │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │                   │ V4 Pro, the        │ $1.32 / $3.96 at   │
+  │           │ deepseek-v4-pro   │ stronger model     │ peak, half that    │
+  │           │                   │                    │ off-peak           │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │                   │ Flagship,          │                    │
+  │ OpenAI    │ gpt-6-astra       │ recommended for    │ $10 / $50          │
+  │           │                   │ coding             │                    │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │ gpt-6.1-sol       │ Close to Astra,    │ $2 / $10           │
+  │           │                   │ cheaper            │                    │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │ gpt-6.1-terra     │ Fast               │ $1 / $5            │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │ gpt-6-luna        │ High volume,       │ $0.10 / $0.50      │
+  │           │                   │ cheapest           │                    │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │ Anthropic │ claude-opus-5-5   │ Current Opus,      │ $4 / $20           │
+  │           │                   │ default choice     │                    │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │ claude-sonnet-5-5 │ Current Sonnet     │ $2 / $10           │
+  ├───────────┼───────────────────┼────────────────────┼────────────────────┤
+  │           │ claude-haiku-5-5  │ Current Haiku,     │ $0.10 / $0.50      │
+  │           │                   │ cheapest           │                    │
+  └───────────┴───────────────────┴────────────────────┴────────────────────┘
+
+  All three providers now have thinking/reasoning on by default, and all of them
+  ignore or reject temperature. That matters a lot for this repo, which relies
+  on temperature=0 for the first (deterministic) sample and 0.8 for the varied
+  ones.
+
+  What breaks per provider
+
+  DeepSeek (low complexity)
+  - Model ID changes. The OpenAI-compatible endpoint is still
+    https://api.deepseek.com, so request_chatgpt_engine keeps working.
+  - temperature is silently ignored in thinking mode, with no error. You can
+    turn thinking off with extra_body={"thinking": {"type": "disabled"}}. Effort
+    is set with reasoning_effort: low, high or max.
+  - The answer still comes back in message.content, with reasoning in a separate
+    reasoning_content field, so model.py:363 is fine. The DeepSeek path doesn't
+    use tools, so the rule about passing reasoning back in tool conversations
+    doesn't apply.
+  - The docs don't say whether thinking tokens count toward max_tokens, so the
+    current limit of 1024 needs testing.
+
+  OpenAI (medium complexity)
+  - All four GPT-6 models are reasoning models. temperature and top_p must be
+    removed unless reasoning_effort="none", which only Terra and Luna support.
+    Astra and Sol don't.
+  - max_completion_tokens replaces max_tokens, and it includes reasoning tokens.
+    A cap of 1024 could leave no room for the visible answer.
+  - n (the code's batch_size) may be capped at 2 according to the API reference.
+    I couldn't confirm whether that applies to GPT-6. localize.py and repair.py
+    request several samples with n, so we need to test this.
+  - Chat Completions still works without tools, which is how the OpenAI path
+    uses it. Only tool calling needs the Responses API.
+
+  Anthropic (high complexity): everything from my first answer still holds:
+  - temperature returns a 400 error on Opus/Sonnet 5.5, and on every model under
+    the newest API version.
+  - client.beta.prompt_caching was removed.
+  - Thinking blocks come before the text, so content[0].text breaks.
+  - The tool-loop message rebuild has to change.
+  - max_tokens has to go up.
+
+  Plan
+
+  Phase 0: shared groundwork (do first, no change in behaviour)
+  1. Upgrade anthropic and openai, then pin the versions in requirements.txt.
+  2. Create one model registry in agentless/util/model.py: model ID, backend,
+     whether it accepts temperature, and price. Have the 4 command-line scripts
+     import it instead of keeping their own copied lists.
+  3. Make the create_*_config functions only send temperature when the registry
+     says the model supports it.
+  4. Make dev/util/cost.py take prices from the registry instead of the
+     hard-coded GPT-4o rates.
+
+  Phase 1: DeepSeek. Switch to deepseek-flash / deepseek-v4-pro, decide whether
+  thinking stays on, check max_tokens, then test on 1 instance.
+
+  Phase 2: OpenAI. Use max_completion_tokens, add reasoning_effort, drop
+  temperature for reasoning models, check the n limit and fall back to looping
+  if it's capped. Test on 1 instance.
+
+  Phase 3: Anthropic. Make the api_requests.py and model.py fixes listed above
+  and raise max_tokens. Test both the plain path and the tool-use path on 1
+  instance.
+
+  Phase 4: clean-up. Update the README example commands. Check that
+  text-embedding-3-small in fl/Index.py:260 still exists; I haven't checked it
+  yet.
+
+  Decisions I need from you
+
+  1. Which model per provider? Flagship (Opus 5.5 / GPT-6 Astra / V4 Pro) or
+     cheaper (Sonnet 5.5 / GPT-6.1 Sol / Flash)? Running SWE-bench costs add up
+     quickly.
+  2. How to get varied samples? Temperature no longer controls this. Options are
+     to rely on the natural variation thinking models already have, or to turn
+     thinking off where the provider allows it (DeepSeek, GPT-6.1 Terra, GPT-6
+     Luna) so temperature works again. This affects how comparable your results
+     are to the original Agentless paper.
+  3. Same phase order (DeepSeek → OpenAI → Anthropic)? Or Anthropic first if
+     Claude is your main backend?
+
+  Sources:
+  - DeepSeek models & pricing
+  - DeepSeek API changelog
+  - DeepSeek thinking mode guide
+  - DeepSeek deprecation coverage (TheRouter.ai)
+  - OpenAI models
+  - Using GPT-6 (OpenAI migration guide)
+  - OpenAI Chat Completions reference
+  - GPT-6.1 Sol/Astra migration errors (OpenAI forum)
+  - Claude model IDs and constraints: Anthropic's API reference bundled with
+    Claude Code (cached 2026-10-06)
+
+✻ Sautéed for 57s · done 6:32 PM
+
+※ recap: You're updating Agentless to the newest DeepSeek, OpenAI and Claude models, and I've drafted a phased plan from the current docs. Next, pick a model per provider and how to get varied samples, then I'll start the shared groundwork. (disable recaps in /config)
+
+❯ Ok. I'm going to do phase 0 first before making any decisions                 
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  Interrupted · What should Claude do instead?
+✻ Brewed for 8s · done 8:06 PM
+
+❯ tell me how to do phase 0                                                     
+
+  Read 2 files, wrote 2 memories (ctrl+o to expand)
+
+● Here's Phase 0 as six steps. The goal is that the code behaves exactly as it
+  does now, but switching to a new model later only means adding an entry to one
+  list. Every step can be tested on its own.
+
+  ---
+
+  Step 1: Start from a clean commit
+
+  Your branch has uncommitted changes in nearly every file. Commit or stash them
+  first, so the Phase 0 diff contains only Phase 0:
+  git add -A && git commit -m "wip: before phase 0"
+
+  Step 2: Upgrade the SDKs
+
+  python3 --version              # the newest anthropic SDK needs 3.10+
+  pip install -U anthropic openai
+  pip show anthropic openai | grep -E "Name|Version"
+  Then pin those exact versions in requirements.txt, for example
+  anthropic==X.Y.Z and openai==X.Y.Z.
+
+  ▎ The newer anthropic SDK no longer has client.beta.prompt_caching 
+  ▎ (api_requests.py:151). That's fine for now: the Claude path already fails 
+  ▎ because its model is retired, and Phase 3 fixes both.
+
+  Step 3: Create the model registry
+
+  Create a new file agentless/util/model_registry.py. I originally suggested
+  putting this in model.py, but api_requests.py needs to import it, and model.py
+  already imports api_requests.py, so that would be a circular import.
+
+  """Single source of truth for supported models."""
+
+  # price = USD per 1M tokens (input, output)
+  # supports_temperature = whether sending `temperature` actually has an effect 
+  / is allowed
+  MODELS = {
+      # --- legacy (kept so Phase 0 changes no behaviour; remove in Phases 1-3) 
+  ---
+      "gpt-4o-2024-05-13":          {"backend": "openai",
+  "supports_temperature": True,  "price": (5.00, 15.00)},
+      "gpt-4o-mini-2024-07-18":     {"backend": "openai",
+  "supports_temperature": True,  "price": (0.15, 0.60)},
+      "claude-3-5-sonnet-20241022": {"backend": "anthropic",
+  "supports_temperature": True,  "price": (3.00, 15.00)},
+      "deepseek-coder":             {"backend": "deepseek",
+  "supports_temperature": True,  "price": (0.14, 0.28)},
+
+      # --- current (verified 2026-11-02) ---
+      "deepseek-flash":     {"backend": "deepseek",  "supports_temperature":
+  False, "price": (0.30, 1.20)},   # peak price
+      "deepseek-v4-pro":    {"backend": "deepseek",  "supports_temperature":
+  False, "price": (1.32, 3.96)},   # peak price
+      "gpt-6-astra":        {"backend": "openai",    "supports_temperature":
+  False, "price": (10.00, 50.00)},
+      "gpt-6.1-sol":        {"backend": "openai",    "supports_temperature":
+  False, "price": (2.00, 10.00)},
+      "gpt-6.1-terra":      {"backend": "openai",    "supports_temperature":
+  False, "price": (1.00, 5.00)},
+      "gpt-6-luna":         {"backend": "openai",    "supports_temperature":
+  False, "price": (0.10, 0.50)},
+      "claude-opus-5-5":    {"backend": "anthropic", "supports_temperature":
+  False, "price": (4.00, 20.00)},
+      "claude-sonnet-5-5":  {"backend": "anthropic", "supports_temperature":
+  False, "price": (2.00, 10.00)},
+      "claude-haiku-5-5":   {"backend": "anthropic", "supports_temperature":
+  False, "price": (0.10, 0.50)},
+  }
+
+  DEFAULT_MODEL = "gpt-4o-2024-05-13"   # unchanged for now; pick a new default 
+  after the phase decisions
+  BACKENDS = sorted({m["backend"] for m in MODELS.values()})
+
+
+  def supports_temperature(model: str) -> bool:
+      # Unknown models keep the old behaviour (send temperature)
+      return MODELS.get(model, {}).get("supports_temperature", True)
+
+
+  def get_price(model: str):
+      return MODELS[model]["price"]
+
+
+  def check_backend(model: str, backend: str):
+      expected = MODELS[model]["backend"]
+      assert backend == expected, f"Model {model} requires `--backend
+  {expected}` (got {backend})"
+  The prices of the legacy models are the historical rates and are only there so
+  cost.py keeps working. All the new models have temperature set to False for
+  now. Change that per model in the later phases if you turn thinking off
+  (decision 2 from the plan).
+
+  Step 4: Point the 4 scripts at the registry
+
+  In each of these files:
+  - agentless/fl/localize.py:571
+  - agentless/repair/repair.py:747
+  - agentless/test/generate_reproduction_tests.py:495
+  - agentless/test/select_regression_tests.py:174
+
+  a) Add the import at the top:
+  from agentless.util.model_registry import BACKENDS, DEFAULT_MODEL, MODELS,
+  check_backend
+  b) Replace the --model and --backend arguments:
+  parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
+  choices=list(MODELS))
+  parser.add_argument("--backend", type=str, default="openai", choices=BACKENDS)
+  c) Replace the DeepSeek-only assert with the general check. In localize.py
+  it's at line 520; search for "Must specify \--backend deepseek`"` in the other
+  three files:
+  check_backend(args.model, args.backend)
+  This catches every mismatch, for example --model claude-opus-5-5 --backend 
+  openai, not just DeepSeek ones.
+
+  Step 5: Only send temperature when the model supports it
+
+  In agentless/util/api_requests.py, import the helper:
+  from agentless.util.model_registry import supports_temperature
+  Then, in both create_chatgpt_config (just before return config, line 50) and
+  create_anthropic_config (before the if tools: at line 128), add:
+      if not supports_temperature(model):
+          config.pop("temperature", None)
+  Every model that's currently in use has True, so nothing changes until you
+  switch models.
+
+  Step 6: Take prices in cost.py from the registry
+
+  In dev/util/cost.py:
+  from agentless.util.model_registry import DEFAULT_MODEL, MODELS, get_price
+  Change def cost(fp): to def cost(fp, model): and replace line 35:
+      price_in, price_out = get_price(model)
+      cost = sum_prompt * price_in / 1000000 + sum_completion * price_out /
+  1000000
+  In main():
+      parser.add_argument("--model", type=str, default=DEFAULT_MODEL,
+  choices=list(MODELS))
+      ...
+          cost(args.output_file, args.model)
+  The default is gpt-4o-2024-05-13 at $5 / $15, so the output is the same as
+  before.
+
+  ---
+
+  Check that it worked
+
+  # 1. Imports work, no circular import
+  python -c "import agentless.util.api_requests, agentless.util.model"
+
+  # 2. New models show up in each script's options
+  python -m agentless.fl.localize --help | grep -A3 -- "--model"
+
+  # 3. Backend check fires (should fail with "requires `--backend anthropic`")
+  python -m agentless.fl.localize --output_folder /tmp/x --file_level --model
+  claude-opus-5-5 --backend openai
+
+  # 4. Behaviour unchanged: --mock counts prompt tokens without making any API 
+  calls
+  python -m agentless.fl.localize --output_folder results/phase0_mock
+  --file_level --mock --target_id django__django-11099
+  Then commit:
+  git commit -am "refactor: central model registry (phase 0)"
+
+  If anything fails, paste the error and I'll help you fix it. When Phase 0 is
+  in, we can go back to the three open decisions.
+
+✻ Cogitated for 57s · done 8:07 PM
+
+※ recap: You're moving Agentless off retired models to current DeepSeek, OpenAI and Claude ones, starting with Phase 0, the shared groundwork you're doing yourself. Next, commit your current changes, then upgrade the SDKs and create model_registry.py. (disable recaps in /config)
+
+❯  /export                                                                      
+
+● Your message started with a space, so /export reached me as text and the
+  command didn't run. Type it again with the / as the very first character:
+
+  /export
+
+  The earlier export from this session is saved at
+  /mnt/c/Users/tssur/Desktop/FYP 
+  Development/Agentless/2026-11-02-175940-how-to-update-api-models.txt, but it
+  doesn't include the model research or the Phase 0 steps. Running /export now
+  will save a new file with everything.
+
+✻ Worked for 4s · done 10:38 PM
