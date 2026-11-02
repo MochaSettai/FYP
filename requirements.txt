@@ -1,5 +1,5 @@
-anthropic
-openai
+anthropic==2.4.0
+openai==3.42.1
 pre-commit
 datasets
 tiktoken
