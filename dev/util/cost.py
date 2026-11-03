@@ -1,9 +1,9 @@
 import argparse
 
 from agentless.util.utils import load_jsonl
+from agentless.util.model_registry import DEFAULT_MODEL, MODELS, get_price
 
-
-def cost(fp):
+def cost(fp, model):
     def flatten_trajs(record, trajs):
         if isinstance(record, dict):
             trajs.append(record)
@@ -34,7 +34,8 @@ def cost(fp):
 
         total += 1
 
-    cost = sum_prompt * 5 / 1000000 + sum_completion * 15 / 1000000
+    price_in, price_out = get_price(model)
+    cost = sum_prompt * price_in / 1000000 + sum_completion * price_out / 1000000
     tokens = sum_prompt + sum_completion
 
     print(f"Total cost: {cost = }")
@@ -64,13 +65,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_file", type=str, required=True)
     parser.add_argument("--embedding_cost", action="store_true")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, choices=list(MODELS))
 
     args = parser.parse_args()
 
     if args.embedding_cost:
         embedding_cost(args.output_file)
     else:
-        cost(args.output_file)
+        cost(args.output_file, args.model)
 
 
 if __name__ == "__main__":
