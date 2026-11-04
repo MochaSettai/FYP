@@ -7,10 +7,9 @@ MODELS = {
     "gpt-4o-2024-05-13":          {"backend": "openai",    "supports_temperature": True,  "price": (5.00, 15.00)},
     "gpt-4o-mini-2024-07-18":     {"backend": "openai",    "supports_temperature": True,  "price": (0.15, 0.60)},
     "claude-3-5-sonnet-20241022": {"backend": "anthropic", "supports_temperature": True,  "price": (3.00, 15.00)},
-    "deepseek-coder":             {"backend": "deepseek",  "supports_temperature": True,  "price": (0.14, 0.28)},
 
     # --- current (verified 2026-11-02) ---
-    "deepseek-flash":     {"backend": "deepseek",  "supports_temperature": False, "price": (0.30, 1.20)},   # peak price
+    "deepseek-flash":     {"backend": "deepseek",  "supports_temperature": True,  "price": (0.30, 1.20)},   # peak price; temperature works because DeepSeekChatDecoder disables thinking
     "deepseek-v4-pro":    {"backend": "deepseek",  "supports_temperature": False, "price": (1.32, 3.96)},   # peak price
     "gpt-6-astra":        {"backend": "openai",    "supports_temperature": False, "price": (10.00, 50.00)},
     "gpt-6.1-sol":        {"backend": "openai",    "supports_temperature": False, "price": (2.00, 10.00)},

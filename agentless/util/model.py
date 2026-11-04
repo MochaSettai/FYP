@@ -354,6 +354,7 @@ class DeepSeekChatDecoder(DecoderBase):
                 batch_size=1,
                 model=self.name,
             )
+            config["extra_body"] = {"thinking": {"type": "disabled"}}
             ret = request_chatgpt_engine(
                 config, self.logger, base_url="https://api.deepseek.com"
             )
