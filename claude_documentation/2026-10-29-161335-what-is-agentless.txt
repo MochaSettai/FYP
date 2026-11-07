@@ -1,0 +1,197 @@
+ ▐▛███▛█   Claude Code v2.1.312
+▝▜██████▀  Opus 5.5 · Claude Pro
+ ▝▝   ▝▝   /mnt/c/Users/tssur/Desktop/FYP Development/Agentless
+
+
+❯ Can you tell me what this project is about                                    
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● This is Agentless, an open-source research tool from OpenAutoCoder (arXiv 
+  2407.01489). It takes a GitHub issue and an LLM, and produces a patch that
+  fixes the issue. It's mainly built for and tested on the SWE-bench benchmark.
+
+  The core idea: most tools in this space are "agents" that let the LLM decide
+  which actions to take, in a loop. Agentless uses a fixed three-phase pipeline
+  instead. It's simpler and cheaper, and it got competitive results: 27.3% on
+  SWE-bench Lite at about $0.34 per issue in v1.0, and 40.7% on Lite / 50.8% on
+  Verified with Claude 3.5 Sonnet.
+
+  The three phases, and where they live in the code:
+
+  1. Localization (agentless/fl/): narrows down where the bug is in stages.
+     First it picks suspicious files, then the classes or functions in them,
+     then the exact lines to edit. It combines LLM prompting with
+     embedding-based retrieval (retrieve.py, Index.py).
+  2. Repair (agentless/repair/repair.py): asks the LLM for several candidate
+     patches in a simple search/replace diff format.
+  3. Patch validation (agentless/test/ plus repair/rerank.py):
+     - picks existing regression tests to run
+     - generates new tests that reproduce the bug
+     - ranks the candidate patches by their test results (majority voting) and
+       submits the best one
+
+  Supporting pieces:
+  - get_repo_structure/: preprocesses each repository into a structure the
+    localization prompts can use.
+  - agentless/util/: model and API wrappers (OpenAI, Anthropic), file
+    compression and skeletons, and pre/post-processing.
+  - classification/: the authors' manual labels for SWE-bench Lite problems,
+    plus the script that builds SWE-bench Lite-S, a filtered subset without
+    problems whose answer leaks into the issue text or that don't have enough
+    information.
+  - README_swebench.md: the commands to reproduce the full experiments.
+
+  About your working tree: git shows almost every file as modified, but git diff
+  with whitespace and CR changes ignored comes back empty. So those changes are
+  probably just Windows/WSL line endings (CRLF vs LF), not real code edits. If
+  you didn't intend that, running git config core.autocrlf input (or checking
+  the files out again) should clear them.
+
+  I can go deeper on any phase, or help you plan how to extend it for your FYP.
+
+✻ Brewed for 16s · done 3:36 PM
+
+❯ can I use claude instead on openai for this project and how                   
+
+● Skill(claude-api)
+  ⎿  Successfully loaded skill · 1 tool allowed
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Yes. Agentless already supports Claude through --backend anthropic on every
+  LLM step (localize, repair, regression-test selection, reproduction-test
+  generation). It uses the official anthropic SDK, which is already in
+  requirements.txt. However, it won't work as-is: it was written for late 2024
+  and needs some fixes before it runs on current models.
+
+  What's broken today
+
+  1. The only Claude model it allows is retired. --model only accepts
+     claude-3-5-sonnet-20241022, and Anthropic retired Claude Sonnet 3.5 on Oct
+     28, 2025, so every request fails. The fallback default claude-2.1 in
+     agentless/util/api_requests.py:108 was retired on Jul 21, 2025. You need to
+     add a current model to the choices list in agentless/fl/localize.py:579,
+     agentless/repair/repair.py:754,
+     agentless/test/select_regression_tests.py:181 and
+     agentless/test/generate_reproduction_tests.py:502.
+  2. temperature is rejected. Current Opus and Sonnet models return a 400 error
+     when temperature is set. create_anthropic_config always sends it: 0 for
+     single-answer steps, 0.8 when sampling several candidates. It should be
+     dropped for Anthropic requests. Sampling is still random by default, so you
+     still get varied candidate patches.
+  3. The response parsing breaks. AnthropicChatDecoder.codegen in
+     agentless/util/model.py reads ret.content[0].text. On Opus 5.5, thinking is
+     always on, so content[0] is a thinking block, not text. It needs to pick
+     out the text block instead.
+  4. The prompt-caching call is outdated.
+     client.beta.prompt_caching.messages.create is an old beta call. Caching is
+     now standard, so it should be plain client.messages.create.
+  5. max_tokens may be too small. Thinking tokens count against max_tokens. If a
+     step passes something small like 1024, answers can get cut off, so it
+     should be raised (around 16000).
+  6. Errors fail silently. request_anthropic_engine catches every exception and
+     retries up to 40 times with growing sleeps. Any of the errors above will
+     look like a hang rather than a crash, so check the logs if a run seems
+     stuck.
+
+  Which model
+
+  - claude-opus-5-5: the most capable. $4 / $20 per million input / output
+    tokens.
+  - claude-sonnet-5-5: half the price ($2 / $10). Probably good value for
+    SWE-bench-scale runs.
+  - claude-haiku-5-5: much cheaper ($0.10 / $0.50). Worth trying for cheap
+    experiments.
+
+  Since this is for your FYP, the budget is your call. Agentless sends many
+  requests per issue, especially in the repair step where it samples several
+  patches.
+
+  Once fixed, using it looks like:
+
+  export ANTHROPIC_API_KEY=sk-ant-...
+  python agentless/fl/localize.py --file_level --backend anthropic \
+      --model claude-opus-5-5 ...   # same flags as in README_swebench.md
+
+  Repair also has a Claude-only --str_replace_format option, where Claude makes
+  its edits with a str_replace tool instead of writing diffs. It came with the
+  multi-file edit support in the most recent upstream commits. One thing to
+  watch: Opus 5.5 rejects requests that force a specific tool. This code doesn't
+  do that today, so keep it that way if you change it.
+
+  The cost script in dev/util/cost.py likely has old prices hard-coded, so its
+  totals may be wrong.
+
+  I can make all of these changes for you (about six files). Just tell me which
+  model you want as the default. /claude-api migrate can also walk through the
+  model switch.
+
+✻ Worked for 39s · done 4:03 PM
+
+※ recap: You're switching Agentless from OpenAI to Claude, and its built-in Anthropic backend needs fixes first because it only allows a retired model. Next, tell me which default model you want (Opus 5.5, Sonnet 5.5 or Haiku 5.5) and I'll make the changes. (disable recaps in /config)
+
+❯ do you suggest that I use claude or open ai api? Which works better?          
+
+● Keep in mind that I'm made by Anthropic, so I'm not a neutral judge here.
+  Here's the evidence I can point to.
+
+  What the project's own results show. The Agentless authors ran the same
+  pipeline with both providers:
+
+  ┌────────────────────────────────────┬────────────────┬────────────────────┐
+  │         Model in Agentless         │ SWE-bench Lite │ SWE-bench Verified │
+  ├────────────────────────────────────┼────────────────┼────────────────────┤
+  │ GPT-4o (v1.0)                      │ 27.3%          │ —                  │
+  ├────────────────────────────────────┼────────────────┼────────────────────┤
+  │ Claude 3.5 Sonnet (v1.5, Dec 2024) │ 40.7%          │ 50.8%              │
+  └────────────────────────────────────┴────────────────┴────────────────────┘
+
+  That's a large gap in Claude's favour. But it compares 2024 models and
+  pipeline versions that aren't identical, so it doesn't tell you how today's
+  models compare. I don't have reliable current numbers for both providers
+  inside Agentless, and I won't guess. The only real answer is to run both on a
+  small subset, such as 20–50 SWE-bench Lite problems.
+
+  Practical differences in this codebase:
+  - Setup effort: the OpenAI path is the original default and needs fewer
+    changes, as long as the model it names is still available on your account.
+    The Claude path needs the roughly six fixes I listed earlier.
+  - Features: only the Claude backend supports the multi-file
+    --str_replace_format repair mode, which is part of where the 40.7% result
+    came from.
+  - Cost: OpenAI requests ask for N samples in one call and pay for the input
+    once. Claude requests make one call per sample but use prompt caching, which
+    cuts most of the repeated input cost. Either way, cost per issue depends
+    mostly on which model tier you pick.
+
+  My suggestion for an FYP:
+  - If you want to reproduce or compare against the paper, run the GPT-4o setup
+    the paper used as your baseline.
+  - If you want the best solve rate, the evidence leans towards Claude,
+    especially with the str_replace mode.
+  - Even better for a final-year project: support both and compare them on the
+    same subset (solve rate, cost per issue, localization accuracy). That turns
+    the choice into a result for your report, and the pipeline already has a
+    --backend switch, so it's mostly configuration.
+
+● User answered Claude's questions:
+  ⎿  · Which way do you want to go, so I can plan the changes to the Agentless 
+     code? → Just advice for now
+
+● Sounds good, I won't change any code for now.
+
+  When you're ready to decide, the cheapest way to find out is a small pilot.
+  Run both providers on the same 20–50 SWE-bench Lite problems and compare three
+  numbers:
+  - Solve rate
+  - Cost per issue
+  - Localization accuracy: whether the pipeline found the files that the real
+    fix changed
+
+  Just let me know when you want to go ahead, whether that's fixing the Claude
+  backend, checking the OpenAI setup still works, or setting up the comparison.
+
+✻ Cogitated for 23s · done 4:08 PM
+
+※ recap: You're deciding whether your Agentless FYP should run on Claude or OpenAI, and for now you only wanted advice, so no code has changed. Next step: run both on 20–50 SWE-bench Lite problems and compare solve rate and cost. (disable recaps in /config)

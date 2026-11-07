@@ -5,6 +5,8 @@ import anthropic
 import openai
 import tiktoken
 
+from agentless.util.model_registry import supports_temperature
+
 
 def num_tokens_from_messages(message, model="gpt-3.5-turbo-0301"):
     """Returns the number of tokens used by a list of messages."""
@@ -47,6 +49,9 @@ def create_chatgpt_config(
                 {"role": "user", "content": message},
             ],
         }
+    if not supports_temperature(model):
+        config.pop("temperature", None)
+        
     return config
 
 
@@ -124,6 +129,9 @@ def create_anthropic_config(
                 {"role": "user", "content": [{"type": "text", "text": message}]},
             ],
         }
+
+    if not supports_temperature(model):
+        config.pop("temperature", None)
 
     if tools:
         config["tools"] = tools

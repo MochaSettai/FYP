@@ -1,0 +1,124 @@
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Opus 5.5 · Claude Pro
+ ▝▝   ▝▝   /mnt/c/Users/tssur/Desktop/FYP Development/Agentless
+
+
+❯ Hey, the api models used in the repo is outdated. Tell me step by step how I  
+  can update them to the newest models.                                         
+
+  Read 2 files, ran 1 shell command (ctrl+o to expand)
+
+● Skill(claude-api)
+  ⎿  Successfully loaded skill · 1 tool allowed
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The Claude model in the repo, claude-3-5-sonnet-20241022, was retired on Oct
+  28, 2025, so every --backend anthropic run currently fails. The fallback
+  default in api_requests.py, claude-2.1, was retired in July 2025. Changing the
+  model name alone won't be enough, because the current Claude models also
+  reject some of the parameters this code sends. Here are the steps, in order.
+
+  ---
+
+  Step 1: Upgrade the SDKs
+
+  requirements.txt doesn't pin versions, so upgrade and then pin what you tested
+  with:
+  pip install -U anthropic openai
+  pip freeze | grep -E "^(anthropic|openai)=="   # copy these pins into 
+  requirements.txt
+  The newest anthropic (1.x) needs Python 3.10 or later.
+
+  Step 2: Update the --model options in the 4 command-line scripts
+
+  The same list of model names is copied into each of these:
+  - agentless/fl/localize.py:572
+  - agentless/repair/repair.py:747
+  - agentless/test/generate_reproduction_tests.py:495
+  - agentless/test/select_regression_tests.py:174
+
+  Replace the choices and default in each, for example:
+  choices=[
+      "claude-opus-5-5",      # current Opus ($4 / $20 per 1M tokens)
+      "claude-sonnet-5-5",    # current Sonnet, cheaper ($2 / $10 per 1M tokens)
+      "<current OpenAI model>",
+      "deepseek-chat",
+  ],
+  Better still, define the list once (for example in agentless/util/model.py)
+  and import it in all four files, so next time you only change one place. Also
+  update any --model ... example commands in README.md and README_swebench.md.
+
+  Step 3: Fix the Anthropic request code in agentless/util/api_requests.py
+
+  1. Stop sending temperature (lines 112–126). Opus 5.5 and Sonnet 5.5 return a
+     400 error when it's set, so remove the "temperature" key from both config
+     dicts.
+  2. Replace the old prompt-caching call at line 151.
+     client.beta.prompt_caching.messages.create(...) is a removed beta and
+     doesn't exist in current SDKs. Caching is now standard:
+  ret = client.messages.create(**config)   # the cache_control set on line 148 
+  still works
+  3. Change the default model at line 108 from "claude-2.1" to
+     "claude-opus-5-5".
+  4. (Optional) Add "output_config": {"effort": "high"} to set how hard the
+     model thinks. On Opus 5.5 the default effort is medium.
+
+  Step 4: Fix how responses are read in agentless/util/model.py
+
+  On current Claude models, thinking is always on, so the first block of a
+  response is usually a thinking block, not the text.
+  1. Line 308: ret.content[0].text will break. Use:
+  text = next((b.text for b in ret.content if b.type == "text"), "")
+  2. Lines 152–163 (codegen_w_tool): the code builds the assistant message by
+     removing fields from response.to_dict(). Newer responses contain extra
+     fields (such as stop_details) that would then be sent back and cause a 400.
+     Build the message explicitly instead:
+  json_response = response.to_dict()
+  messages.append({"role": "assistant", "content": json_response["content"]})
+     Keep the thinking blocks inside content unchanged; the API expects them
+     back as they were.
+  3. Raise max_tokens: 1024 is too small once thinking is included, and output
+     will be cut off. Raise it to about 16000 at repair/repair.py:408,444,
+     test/generate_reproduction_tests.py:145,176 and
+     test/select_regression_tests.py:97.
+  4. Sampling: passes that use temperature=0.8 to get varied samples
+     (repair.py:445) can't control temperature with Claude anymore. Repeated
+     samples still differ, but if you want to tune that you need a different
+     approach.
+
+  Step 5: Update the OpenAI path, also in api_requests.py
+
+  gpt-4o-2024-05-13 and gpt-4o-mini-2024-07-18 are old. I'm not sure of OpenAI's
+  newest model names as of today, so check their models page rather than taking
+  a name from me. One thing to know: the GPT-5 family and the o-series
+  reasoning models reject max_tokens (they want max_completion_tokens) and
+  reject any temperature other than 1. In create_chatgpt_config (lines 31–49),
+  switch to max_completion_tokens and leave out temperature for those models.
+
+  Step 6: Update DeepSeek
+
+  deepseek-coder was merged into deepseek-chat, with deepseek-reasoner as the
+  reasoning model. The "deepseek" in args.model checks still work.
+
+  Step 7: Update the cost script
+
+  dev/util/cost.py:35 hard-codes GPT-4o prices ($5 / $15 per 1M tokens). Make
+  the price depend on the model, for example Opus 5.5 at $4 / $20 or Sonnet 5.5
+  at $2 / $10.
+
+  Step 8: Test on one instance before a full run
+
+  Run localization and repair on a single SWE-bench instance with --backend 
+  anthropic --model claude-opus-5-5. Check that the outputs aren't empty and
+  that cache_read_input_tokens is above 0 by the second request. Then run the
+  full benchmark.
+
+  ---
+
+  I haven't changed any files. I can make these edits myself, or you can run
+  /claude-api migrate, which walks through the Claude part. Before I start, tell
+  me which OpenAI model you want to use, or whether you only plan to use
+  Claude.
+
+✻ Crunched for 54s · done 5:56 PM

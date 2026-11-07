@@ -1,9 +1,15 @@
-anthropic
-openai
+anthropic==2.4.0
+openai==3.42.1
 pre-commit
-datasets
+datasets==5.1.0
 tiktoken
 libcst
-llama-index
+llama-index-core==0.14.25
+llama-index-embeddings-openai==0.6.0
+numpy==2.5.4
+pyarrow==26.0.0
 jsonlines
 swebench @ git+https://github.com/princeton-nlp/SWE-bench
+
+
+
